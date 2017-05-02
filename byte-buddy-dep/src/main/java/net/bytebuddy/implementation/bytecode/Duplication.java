@@ -121,7 +121,7 @@ public enum Duplication implements StackManipulation {
     /**
      * A duplication that flips a value over the second value on the operand stack.
      */
-    protected enum WithFlip implements StackManipulation {
+    public enum WithFlip implements StackManipulation {
 
         /**
          * A flip instruction that flips a single-sized element over another single-size element.

@@ -13,21 +13,21 @@ import net.bytebuddy.implementation.Implementation;
 import net.bytebuddy.implementation.bytecode.Duplication;
 import net.bytebuddy.implementation.bytecode.Removal;
 import net.bytebuddy.implementation.bytecode.StackManipulation;
-import net.bytebuddy.implementation.bytecode.StackSize;
+import net.bytebuddy.implementation.bytecode.assign.Assigner;
 import net.bytebuddy.implementation.bytecode.constant.DefaultValue;
 import net.bytebuddy.implementation.bytecode.member.FieldAccess;
 import net.bytebuddy.implementation.bytecode.member.MethodInvocation;
+import net.bytebuddy.implementation.bytecode.member.MethodVariableAccess;
 import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.pool.TypePool;
 import net.bytebuddy.utility.CompoundList;
+import net.bytebuddy.utility.visitor.LocalVariableAwareMethodVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 import static net.bytebuddy.matcher.ElementMatchers.*;
 
@@ -44,6 +44,8 @@ import static net.bytebuddy.matcher.ElementMatchers.*;
  */
 @EqualsAndHashCode(callSuper = false)
 public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.MethodVisitorWrapper {
+
+    // TODO: Include configuration for using different TypePool!
 
     /**
      * The method graph compiler to use.
@@ -177,7 +179,7 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                 strict,
                 substitution,
                 instrumentedType,
-                implementationContext,
+                instrumentedMethod, implementationContext,
                 typePool);
     }
 
@@ -613,10 +615,32 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
              * @param result           The expected result type or {@code void} if no result is expected.
              * @return A stack manipulation that applies the resolved byte code representing the substitution.
              */
-            StackManipulation apply(TypeDescription instrumentedType,
-                                    ByteCodeElement target,
-                                    TypeList.Generic arguments,
-                                    TypeDescription.Generic result);
+            Binding apply(TypeDescription instrumentedType,
+                          MethodDescription instrumentedMethod,
+                          ByteCodeElement target,
+                          TypeList.Generic arguments,
+                          TypeDescription.Generic result,
+                          int offset);
+
+            class Binding {
+
+                private final StackManipulation stackManipulation;
+
+                private final int offset;
+
+                protected Binding(StackManipulation stackManipulation, int offset) {
+                    this.stackManipulation = stackManipulation;
+                    this.offset = offset;
+                }
+
+                protected StackManipulation getStackManipulation() {
+                    return stackManipulation;
+                }
+
+                protected int getOffset() {
+                    return offset;
+                }
+            }
 
             /**
              * An unresolved resolver that does not apply a substitution.
@@ -634,10 +658,12 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                 }
 
                 @Override
-                public StackManipulation apply(TypeDescription instrumentedType,
-                                               ByteCodeElement target,
-                                               TypeList.Generic arguments,
-                                               TypeDescription.Generic result) {
+                public Binding apply(TypeDescription instrumentedType,
+                                     MethodDescription instrumentedMethod,
+                                     ByteCodeElement target,
+                                     TypeList.Generic arguments,
+                                     TypeDescription.Generic result,
+                                     int offset) {
                     throw new IllegalStateException("Cannot apply unresolved resolver");
                 }
             }
@@ -658,15 +684,17 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                 }
 
                 @Override
-                public StackManipulation apply(TypeDescription instrumentedType,
-                                               ByteCodeElement target,
-                                               TypeList.Generic arguments,
-                                               TypeDescription.Generic result) {
+                public Binding apply(TypeDescription instrumentedType,
+                                     MethodDescription instrumentedMethod,
+                                     ByteCodeElement target,
+                                     TypeList.Generic arguments,
+                                     TypeDescription.Generic result,
+                                     int offset) {
                     List<StackManipulation> stackManipulations = new ArrayList<StackManipulation>(arguments.size());
                     for (int index = arguments.size() - 1; index >= 0; index--) {
                         stackManipulations.add(Removal.of(arguments.get(index)));
                     }
-                    return new StackManipulation.Compound(CompoundList.of(stackManipulations, DefaultValue.of(result.asErasure())));
+                    return new Binding(new StackManipulation.Compound(CompoundList.of(stackManipulations, DefaultValue.of(result))), offset);
                 }
             }
 
@@ -696,10 +724,12 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                 }
 
                 @Override
-                public StackManipulation apply(TypeDescription instrumentedType,
-                                               ByteCodeElement target,
-                                               TypeList.Generic arguments,
-                                               TypeDescription.Generic result) {
+                public Binding apply(TypeDescription instrumentedType,
+                                     MethodDescription instrumentedMethod,
+                                     ByteCodeElement target,
+                                     TypeList.Generic arguments,
+                                     TypeDescription.Generic result,
+                                     int offset) {
                     if (!fieldDescription.isAccessibleTo(instrumentedType)) {
                         throw new IllegalStateException(instrumentedType + " cannot access " + fieldDescription);
                     } else if (result.represents(void.class)) {
@@ -710,7 +740,7 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                         } else if (!arguments.get(fieldDescription.isStatic() ? 0 : 1).asErasure().isAssignableTo(fieldDescription.getType().asErasure())) {
                             throw new IllegalStateException("Cannot set " + fieldDescription + " to " + arguments.get(fieldDescription.isStatic() ? 0 : 1));
                         }
-                        return FieldAccess.forField(fieldDescription).write();
+                        return new Binding(FieldAccess.forField(fieldDescription).write(), offset);
                     } else {
                         if (arguments.size() != (fieldDescription.isStatic() ? 0 : 1)) {
                             throw new IllegalStateException("Cannot set " + fieldDescription + " with " + arguments);
@@ -719,7 +749,7 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                         } else if (!fieldDescription.getType().asErasure().isAssignableTo(result.asErasure())) {
                             throw new IllegalStateException("Cannot get " + fieldDescription + " as " + result);
                         }
-                        return FieldAccess.forField(fieldDescription).read();
+                        return new Binding(FieldAccess.forField(fieldDescription).read(), offset);
                     }
                 }
             }
@@ -750,10 +780,12 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                 }
 
                 @Override
-                public StackManipulation apply(TypeDescription instrumentedType,
-                                               ByteCodeElement target,
-                                               TypeList.Generic arguments,
-                                               TypeDescription.Generic result) {
+                public Binding apply(TypeDescription instrumentedType,
+                                     MethodDescription instrumentedMethod,
+                                     ByteCodeElement target,
+                                     TypeList.Generic arguments,
+                                     TypeDescription.Generic result,
+                                     int offset) {
                     if (!methodDescription.isAccessibleTo(instrumentedType)) {
                         throw new IllegalStateException(instrumentedType + " cannot access " + methodDescription);
                     }
@@ -770,9 +802,74 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                             throw new IllegalStateException("Cannot invoke " + methodDescription + " on " + arguments);
                         }
                     }
-                    return methodDescription.isVirtual()
+                    return new Binding(methodDescription.isVirtual()
                             ? MethodInvocation.invoke(methodDescription).virtual(target.getDeclaringType().asErasure())
-                            : MethodInvocation.invoke(methodDescription);
+                            : MethodInvocation.invoke(methodDescription), offset);
+                }
+            }
+
+            class Chaining implements Resolver {
+
+                private final Assigner assigner;
+
+                private final List<Element> elements;
+
+                public Chaining(Assigner assigner, List<Element> elements) {
+                    this.assigner = assigner;
+                    this.elements = elements;
+                }
+
+                @Override
+                public boolean isResolved() {
+                    return true;
+                }
+
+                @Override
+                public Binding apply(TypeDescription instrumentedType,
+                                     MethodDescription instrumentedMethod,
+                                     ByteCodeElement target,
+                                     TypeList.Generic arguments,
+                                     TypeDescription.Generic result,
+                                     int offset) {
+                    List<StackManipulation> stackManipulations = new ArrayList<StackManipulation>(arguments.size() + elements.size() + 3);
+                    Map<Integer, Integer> argumentOffsets = new HashMap<Integer, Integer>();
+                    for (int index = arguments.size() - 1; index >= 0; index--) {
+                        argumentOffsets.put(index, offset);
+                        stackManipulations.add(MethodVariableAccess.of(arguments.get(index)).storeAt(offset));
+                        offset += arguments.get(index).getStackSize().getSize();
+                    }
+                    stackManipulations.add(DefaultValue.of(result));
+                    stackManipulations.add(result.represents(void.class)
+                            ? StackManipulation.Trivial.INSTANCE
+                            : MethodVariableAccess.of(result).storeAt(offset));
+                    for (Element element : elements) {
+                        stackManipulations.add(element.apply(instrumentedType,
+                                instrumentedMethod,
+                                target,
+                                arguments,
+                                result,
+                                assigner,
+                                argumentOffsets,
+                                result.represents(void.class)
+                                        ? StackManipulation.Trivial.INSTANCE
+                                        : MethodVariableAccess.of(result).loadFrom(offset)));
+                    }
+                    stackManipulations.add(result.represents(void.class)
+                            ? StackManipulation.Trivial.INSTANCE
+                            : MethodVariableAccess.of(result).loadFrom(offset));
+                    return new Binding(new StackManipulation.Compound(stackManipulations), offset);
+                }
+
+                interface Element {
+
+                    StackManipulation apply(TypeDescription instrumentedType,
+                                            MethodDescription instrumentedMethod,
+                                            ByteCodeElement target,
+                                            TypeList.Generic arguments,
+                                            TypeDescription.Generic result,
+                                            Assigner assigner,
+                                            Map<Integer, Integer> argumentOffsets,
+                                            StackManipulation previousResult);
                 }
             }
         }
@@ -1047,7 +1144,7 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
     /**
      * A method visitor that applies a substitution for matched methods.
      */
-    protected static class SubstitutingMethodVisitor extends MethodVisitor {
+    protected static class SubstitutingMethodVisitor extends LocalVariableAwareMethodVisitor {
 
         /**
          * The method graph compiler to use.
@@ -1068,6 +1165,8 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
          * The instrumented type.
          */
         private final TypeDescription instrumentedType;
+
+        private final MethodDescription instrumentedMethod;
 
         /**
          * The implementation context to use.
@@ -1092,6 +1191,7 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
          * @param strict                {@code true} if the method processing should be strict where an exception is raised if a member cannot be found.
          * @param substitution          The substitution to apply.
          * @param instrumentedType      The instrumented type.
+         * @param instrumentedMethod
          * @param implementationContext The implementation context to use.
          * @param typePool              The type pool to use.
          */
@@ -1100,13 +1200,15 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                                             boolean strict,
                                             Substitution substitution,
                                             TypeDescription instrumentedType,
+                                            MethodDescription instrumentedMethod,
                                             Implementation.Context implementationContext,
                                             TypePool typePool) {
-            super(Opcodes.ASM5, methodVisitor);
+            super(methodVisitor, instrumentedMethod);
             this.methodGraphCompiler = methodGraphCompiler;
             this.strict = strict;
             this.substitution = substitution;
             this.instrumentedType = instrumentedType;
+            this.instrumentedMethod = instrumentedMethod;
             this.implementationContext = implementationContext;
             this.typePool = typePool;
             stackSizeBuffer = 0;
@@ -1124,27 +1226,41 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                     if (resolver.isResolved()) {
                         TypeList.Generic arguments;
                         TypeDescription.Generic result;
+                        StackManipulation.Size base;
                         switch (opcode) {
                             case Opcodes.PUTFIELD:
                                 arguments = new TypeList.Generic.Explicit(candidates.getOnly().getDeclaringType(), candidates.getOnly().getType());
                                 result = TypeDescription.Generic.VOID;
+                                base = new StackManipulation.Size(candidates.getOnly().getType().getStackSize().getSize() + 1);
                                 break;
                             case Opcodes.PUTSTATIC:
                                 arguments = new TypeList.Generic.Explicit(candidates.getOnly().getType());
                                 result = TypeDescription.Generic.VOID;
+                                base = new StackManipulation.Size(candidates.getOnly().getType().getStackSize().getSize());
                                 break;
                             case Opcodes.GETFIELD:
                                 arguments = new TypeList.Generic.Explicit(candidates.getOnly().getDeclaringType());
                                 result = candidates.getOnly().getType();
+                                base = new StackManipulation.Size(1);
                                 break;
                             case Opcodes.GETSTATIC:
                                 arguments = new TypeList.Generic.Empty();
                                 result = candidates.getOnly().getType();
+                                base = new StackManipulation.Size(0);
                                 break;
                             default:
                                 throw new AssertionError();
                         }
-                        resolver.apply(instrumentedType, candidates.getOnly(), arguments, result).apply(mv, implementationContext);
+                        Substitution.Resolver.Binding binding = resolver.apply(instrumentedType,
+                                instrumentedMethod,
+                                candidates.getOnly(),
+                                arguments,
+                                result,
+                                getOffsetLimit());
+                        stackSizeBuffer = Math.max(stackSizeBuffer, base.aggregate(binding.getStackManipulation()
+                                .apply(mv, implementationContext))
+                                .getMaximalSize() - base.getMaximalSize());
+                        requireMinimumOffset(binding.getOffset());
                         return;
                     }
                 } else if (strict) {
@@ -1179,24 +1295,37 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
                 if (!candidates.isEmpty()) {
                     Substitution.Resolver resolver = substitution.resolve(candidates.getOnly(), Substitution.InvocationType.of(opcode, candidates.getOnly()));
                     if (resolver.isResolved()) {
-                        resolver.apply(instrumentedType,
+                        StackManipulation.Size base;
+                        if (candidates.getOnly().isStatic()) {
+                            base = new StackManipulation.Size(candidates.getOnly().getParameters().asTypeList().getStackSize());
+                        } else if (candidates.getOnly().isConstructor()) {
+                            base = new StackManipulation.Size(candidates.getOnly().getParameters().asTypeList().getStackSize() + 2);
+                        } else {
+                            base = new StackManipulation.Size(candidates.getOnly().getParameters().asTypeList().getStackSize() + 1);
+                        }
+                        Substitution.Resolver.Binding binding = resolver.apply(instrumentedType,
+                                instrumentedMethod,
                                 candidates.getOnly(),
                                 candidates.getOnly().isStatic() || candidates.getOnly().isConstructor()
                                         ? candidates.getOnly().getParameters().asTypeList()
                                         : new TypeList.Generic.Explicit(CompoundList.of(candidates.getOnly().getDeclaringType(), candidates.getOnly().getParameters().asTypeList())),
                                 candidates.getOnly().isConstructor()
                                         ? candidates.getOnly().getDeclaringType().asGenericType()
-                                        : candidates.getOnly().getReturnType()).apply(mv, implementationContext);
+                                        : candidates.getOnly().getReturnType(),
+                                getOffsetLimit());
+                        StackManipulation.Size size = base.aggregate(binding.getStackManipulation().apply(mv, implementationContext));
                         if (candidates.getOnly().isConstructor()) {
-                            stackSizeBuffer = new StackManipulation.Compound(
-                                    Duplication.SINGLE.flipOver(TypeDescription.OBJECT),
+                            size = size.aggregate(new StackManipulation.Compound(
+                                    Duplication.WithFlip.SINGLE_SINGLE,
                                     Removal.SINGLE,
                                     Removal.SINGLE,
-                                    Duplication.SINGLE.flipOver(TypeDescription.OBJECT),
+                                    Duplication.WithFlip.SINGLE_SINGLE,
                                     Removal.SINGLE,
                                     Removal.SINGLE
-                            ).apply(mv, implementationContext).getMaximalSize() + StackSize.SINGLE.getSize();
+                            ).apply(mv, implementationContext));
                         }
+                        stackSizeBuffer = Math.max(stackSizeBuffer, size.getMaximalSize() - base.getMaximalSize());
+                        requireMinimumOffset(binding.getOffset());
                         return;
                     }
                 } else if (strict) {
@@ -1210,8 +1339,8 @@ public class MemberSubstitution implements AsmVisitorWrapper.ForDeclaredMethods.
         }
 
         @Override
-        public void visitMaxs(int maxStack, int maxLocals) {
-            super.visitMaxs(maxStack + stackSizeBuffer, maxLocals);
+        public void visitMaxs(int stackSize, int localVariableLength) {
+            super.visitMaxs(stackSize + stackSizeBuffer, localVariableLength);
         }
     }
 }

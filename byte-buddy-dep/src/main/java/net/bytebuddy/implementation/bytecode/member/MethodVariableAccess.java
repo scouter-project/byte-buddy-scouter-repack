@@ -448,7 +448,7 @@ public enum MethodVariableAccess {
         @Override
         public Size apply(MethodVisitor methodVisitor, Implementation.Context implementationContext) {
             methodVisitor.visitIincInsn(offset, value);
-            return new Size(0, 0);
+            return new Size(0);
         }
     }
 }

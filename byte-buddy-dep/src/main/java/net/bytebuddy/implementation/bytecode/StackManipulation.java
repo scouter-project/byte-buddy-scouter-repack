@@ -91,6 +91,10 @@ public interface StackManipulation {
          */
         private final int maximalSize;
 
+        public Size(int size) {
+            this(size, size);
+        }
+
         /**
          * Creates an immutable descriptor of the size change that is implied by some stack manipulation.
          *
