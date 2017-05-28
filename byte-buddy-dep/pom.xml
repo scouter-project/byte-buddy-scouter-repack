@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>net.bytebuddy</groupId>
+        <groupId>scouter.repack.net.bytebuddy</groupId>
         <artifactId>byte-buddy-parent</artifactId>
         <version>1.7.1-SNAPSHOT</version>
     </parent>
@@ -33,6 +33,16 @@
                 </exclusion>
             </exclusions>
         </dependency>
+
+        <!-- dependency for scouter -->
+        <dependency>
+            <groupId>com.github.scouter-project</groupId>
+            <artifactId>scouter-agent-java</artifactId>
+            <version>0.1</version>
+            <systemPath>${basedir}/../scouter-lib-for-compile/scouter.agent.jar</systemPath>
+            <scope>system</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm-util</artifactId>

@@ -6224,6 +6224,23 @@ public interface AgentBuilder {
                             /* do nothing */
                     }
                 }
+
+                try {
+                    //Add Scouter hooking
+                    byte[] custom = new scouter.agent.LambdaFormTransformer().transform(
+                            targetType.getClassLoader(),
+                            lambdaClassName.replace('.', '/'),
+                            NOT_PREVIOUSLY_DEFINED,
+                            targetType.getProtectionDomain(),
+                            classFile,
+                            lambdaMethodName,
+                            lambdaMethod.getDescriptor(),
+                            LAMBDA_FACTORY,
+                            factoryMethod.getDescriptor());
+                    classFile = custom == null ? classFile : custom;
+                } catch (Throwable ignored) {
+                }
+
                 return classFile;
             }
 

@@ -3,12 +3,12 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>net.bytebuddy</groupId>
+        <groupId>scouter.repack.net.bytebuddy</groupId>
         <artifactId>byte-buddy-parent</artifactId>
         <version>1.7.1-SNAPSHOT</version>
     </parent>
 
-    <artifactId>byte-buddy</artifactId>
+    <artifactId>byte-buddy-scouter-repack</artifactId>
     <packaging>jar</packaging>
 
     <name>Byte Buddy (without dependencies)</name>
@@ -27,7 +27,9 @@
 
     <properties>
         <shade.source>org.objectweb.asm</shade.source>
-        <shade.target>net.bytebuddy.jar.asm</shade.target>
+        <shade.target>scouter.repack.net.bytebuddy.jar.asm</shade.target>
+        <scouter.repack.source>net.bytebuddy</scouter.repack.source>
+        <scouter.repack.target>scouter.repack.net.bytebuddy</scouter.repack.target>
     </properties>
 
     <!--
@@ -66,9 +68,35 @@
                                     <pattern>${shade.source}</pattern>
                                     <shadedPattern>${shade.target}</shadedPattern>
                                 </relocation>
+                                <relocation>
+                                    <pattern>${scouter.repack.source}</pattern>
+                                    <shadedPattern>${scouter.repack.target}</shadedPattern>
+                                </relocation>
                             </relocations>
                         </configuration>
                     </execution>
+                    <!--<execution>-->
+                        <!--<phase>package</phase>-->
+                        <!--<goals>-->
+                            <!--<goal>shade</goal>-->
+                        <!--</goals>-->
+                        <!--<configuration>-->
+                            <!--<shadedArtifactAttached>false</shadedArtifactAttached>-->
+                            <!--<createDependencyReducedPom>true</createDependencyReducedPom>-->
+                            <!--<createSourcesJar>true</createSourcesJar>-->
+                            <!--<shadeSourcesContent>true</shadeSourcesContent>-->
+                            <!--<relocations>-->
+                                <!--<relocation>-->
+                                    <!--<pattern>${shade.source}</pattern>-->
+                                    <!--<shadedPattern>${shade.target}</shadedPattern>-->
+                                <!--</relocation>-->
+                                <!--<relocation>-->
+                                    <!--<pattern>${scouter.repack.source}</pattern>-->
+                                    <!--<shadedPattern>${scouter.repack.target}</shadedPattern>-->
+                                <!--</relocation>-->
+                            <!--</relocations>-->
+                        <!--</configuration>-->
+                    <!--</execution>-->
                 </executions>
             </plugin>
             <!-- Disable pitest as it fails for empty modules -->
