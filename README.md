@@ -1,4 +1,4 @@
-Byte Buddy
+Byte Buddy for scouter repackaging 
 ==========
 
 <a href="http://bytebuddy.net">
