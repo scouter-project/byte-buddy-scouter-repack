@@ -37,7 +37,7 @@
         <!-- dependency for scouter -->
         <dependency>
             <groupId>com.github.scouter-project</groupId>
-            <artifactId>scouter-agent-java</artifactId>
+            <artifactId>scouter-agent-java-for-bytebuddy-compile</artifactId>
             <version>0.1</version>
             <systemPath>${basedir}/../scouter-lib-for-compile/scouter.agent.jar</systemPath>
             <scope>system</scope>
